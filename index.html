@@ -2,56 +2,68 @@
 <html lang="pt-br">
 <head>
 <meta charset="UTF-8">
-<title>Dashboard Fiscal Ajustado</title>
+<title>Dashboard Fiscal Completo</title>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <style>
-body { font-family: Arial; background: #0f172a; color: white; padding: 20px; }
-.card { background: #1e293b; padding: 20px; border-radius: 10px; margin-bottom: 20px; }
-.grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
-.kpi { font-size: 18px; font-weight: bold; }
+body { font-family: Arial; background:#0f172a; color:white; padding:20px; }
+.card { background:#1e293b; padding:20px; border-radius:10px; margin-bottom:20px; }
+table { width:100%; border-collapse: collapse; margin-top:10px; }
+th, td { border:1px solid #334155; padding:8px; text-align:center; }
+th { background:#334155; }
+.alert { color:#f87171; }
+.ok { color:#4ade80; }
 </style>
 </head>
 <body>
 
-<h1>📊 Dashboard Fiscal (Sem IA)</h1>
+<h1>📊 Análise Completa de Balancetes</h1>
 
 <div class="card">
 <input type="file" id="fileInput" multiple>
-<button onclick="processar()">Analisar Balancetes</button>
-</div>
-
-<div class="grid">
-<div class="card kpi" id="receita"></div>
-<div class="card kpi" id="despesa"></div>
-<div class="card kpi" id="resultado"></div>
-<div class="card kpi" id="meses"></div>
+<button onclick="processar()">Analisar PDFs</button>
 </div>
 
 <div class="card">
-<canvas id="grafico"></canvas>
+<h2>📋 Tabela por Categoria</h2>
+<div id="tabela"></div>
 </div>
 
 <div class="card">
+<h2>📄 Diagnóstico</h2>
 <pre id="relatorio"></pre>
 </div>
 
 <script>
-let dados = [];
-let chart;
+let dados = {};
+let meses = [];
+
+const categoriasPadrao = [
+  "PESSOAL",
+  "SERVICOS",
+  "ENERGIA",
+  "MANUTENCAO",
+  "CONSERVACAO",
+  "OBRAS",
+  "ADMIN",
+  "IMOBILIZADO",
+  "IMPOSTOS",
+  "OUTROS"
+];
 
 async function processar() {
-  dados = [];
+  dados = {};
+  meses = [];
 
-  const files = document.getElementById('fileInput').files;
+  const files = document.getElementById("fileInput").files;
 
   for (let file of files) {
     await lerPDF(file);
   }
 
-  gerarDashboard();
+  montarTabela();
+  gerarRelatorio();
 }
 
 async function lerPDF(file) {
@@ -59,15 +71,14 @@ async function lerPDF(file) {
 
   return new Promise((resolve) => {
     reader.onload = async function() {
-      const typedarray = new Uint8Array(this.result);
-      const pdf = await pdfjsLib.getDocument(typedarray).promise;
+      const pdf = await pdfjsLib.getDocument(new Uint8Array(this.result)).promise;
 
       let texto = "";
 
       for (let i = 1; i <= pdf.numPages; i++) {
         const page = await pdf.getPage(i);
         const content = await page.getTextContent();
-        content.items.forEach(item => texto += item.str + " ");
+        content.items.forEach(item => texto += item.str + "\n");
       }
 
       analisarTexto(texto, file.name);
@@ -79,94 +90,105 @@ async function lerPDF(file) {
 }
 
 function extrairMes(nome) {
-  const meses = ["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"];
+  const mesesNome = ["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"];
   nome = nome.toLowerCase();
 
-  for (let m of meses) {
+  for (let m of mesesNome) {
     if (nome.includes(m)) return m.toUpperCase();
   }
 
-  return "MÊS " + (dados.length + 1);
+  return "MES_" + (meses.length + 1);
 }
 
-function extrairValor(texto, regex) {
-  const match = texto.match(regex);
-  if (!match) return 0;
+function detectarCategoria(linha) {
+  linha = linha.toLowerCase();
 
-  return parseFloat(match[1].replace(/\./g, "").replace(",", "."));
+  if (linha.includes("pessoal")) return "PESSOAL";
+  if (linha.includes("serviço")) return "SERVICOS";
+  if (linha.includes("energia")) return "ENERGIA";
+  if (linha.includes("manutenção")) return "MANUTENCAO";
+  if (linha.includes("conservação")) return "CONSERVACAO";
+  if (linha.includes("obras")) return "OBRAS";
+  if (linha.includes("administrativa")) return "ADMIN";
+  if (linha.includes("imobilizado")) return "IMOBILIZADO";
+  if (linha.includes("tributos")) return "IMPOSTOS";
+
+  return "OUTROS";
 }
 
 function analisarTexto(texto, nome) {
-  // 🔥 EXTRAÇÃO CORRETA (baseado no seu PDF real)
-  const receitas = extrairValor(texto, /TOTAL DE RECEITAS:\\s*([\\d.,]+)/i);
-  const despesas = extrairValor(texto, /TOTAL DE DESPESAS:\\s*([\\d.,]+)/i);
+  const mes = extrairMes(nome);
+  meses.push(mes);
 
-  const resultado = receitas - despesas;
+  dados[mes] = {};
+  categoriasPadrao.forEach(c => dados[mes][c] = 0);
 
-  dados.push({
-    mes: extrairMes(nome),
-    receitas,
-    despesas,
-    resultado
+  const linhas = texto.split("\n");
+
+  let categoriaAtual = "OUTROS";
+
+  linhas.forEach(linha => {
+    let catDetectada = detectarCategoria(linha);
+
+    if (catDetectada !== "OUTROS") {
+      categoriaAtual = catDetectada;
+    }
+
+    const valores = linha.match(/\d+[.,]\d+/g);
+
+    if (valores) {
+      valores.forEach(v => {
+        let valor = parseFloat(v.replace(".", "").replace(",", "."));
+        if (!isNaN(valor)) {
+          dados[mes][categoriaAtual] += valor;
+        }
+      });
+    }
   });
 }
 
-function gerarDashboard() {
-  let totalReceita = dados.reduce((a,b)=>a+b.receitas,0);
-  let totalDespesa = dados.reduce((a,b)=>a+b.despesas,0);
-  let totalResultado = totalReceita - totalDespesa;
+function montarTabela() {
+  let html = "<table><tr><th>Categoria</th>";
 
-  document.getElementById("receita").innerText = "💰 Receita: R$ " + totalReceita.toFixed(2);
-  document.getElementById("despesa").innerText = "💸 Despesa: R$ " + totalDespesa.toFixed(2);
-  document.getElementById("resultado").innerText = "📊 Resultado: R$ " + totalResultado.toFixed(2);
-  document.getElementById("meses").innerText = "📅 Meses: " + dados.length;
+  meses.forEach(m => html += `<th>${m}</th>`);
 
-  if (chart) chart.destroy();
+  html += "</tr>";
 
-  chart = new Chart(document.getElementById("grafico"), {
-    type: 'line',
-    data: {
-      labels: dados.map(d=>d.mes),
-      datasets: [
-        { label: "Receita", data: dados.map(d=>d.receitas) },
-        { label: "Despesa", data: dados.map(d=>d.despesas) },
-        { label: "Resultado", data: dados.map(d=>d.resultado) }
-      ]
-    }
+  categoriasPadrao.forEach(cat => {
+    html += `<tr><td>${cat}</td>`;
+
+    meses.forEach(m => {
+      let valor = dados[m][cat] || 0;
+      html += `<td>R$ ${valor.toFixed(2)}</td>`;
+    });
+
+    html += "</tr>";
   });
 
-  gerarRelatorio();
+  html += "</table>";
+
+  document.getElementById("tabela").innerHTML = html;
 }
 
 function gerarRelatorio() {
-  let texto = "📊 RELATÓRIO PARA SÍNDICO\\n\\n";
+  let texto = "📊 DIAGNÓSTICO\\n\\n";
 
-  dados.forEach((m, i) => {
-    texto += `📅 ${m.mes}\\n`;
-    texto += `Receita: R$ ${m.receitas.toFixed(2)}\\n`;
-    texto += `Despesa: R$ ${m.despesas.toFixed(2)}\\n`;
-    texto += `Resultado: R$ ${m.resultado.toFixed(2)}\\n`;
+  meses.forEach((m, i) => {
+    let total = Object.values(dados[m]).reduce((a,b)=>a+b,0);
 
-    if (m.resultado < 0) {
-      texto += "❌ PREJUÍZO DETECTADO\\n";
-    }
+    texto += `${m}: Total despesas R$ ${total.toFixed(2)}\\n`;
 
     if (i > 0) {
-      let variacao = m.resultado - dados[i-1].resultado;
-      texto += `📈 Variação: ${variacao.toFixed(2)}\\n`;
+      let prev = Object.values(dados[meses[i-1]]).reduce((a,b)=>a+b,0);
+      let diff = total - prev;
+
+      texto += `Variação: ${diff.toFixed(2)}\\n`;
+
+      if (diff > 0) texto += "⚠️ Aumento de custo\\n";
     }
 
     texto += "\\n";
   });
-
-  texto += "🚨 ANÁLISE\\n";
-
-  if (dados.some(m => m.resultado < 0)) {
-    texto += "- Existem meses com prejuízo\\n";
-  }
-
-  texto += "- Monitorar despesas mensais\\n";
-  texto += "- Avaliar contratos e custos fixos\\n";
 
   document.getElementById("relatorio").innerText = texto;
 }
