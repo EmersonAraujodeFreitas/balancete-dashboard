@@ -2,7 +2,7 @@
 <html lang="pt-br">
 <head>
 <meta charset="UTF-8">
-<title>Dashboard Fiscal PRO</title>
+<title>Dashboard Fiscal Inteligente PRO</title>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -10,22 +10,23 @@
 <style>
 body { font-family: Arial; background: #0f172a; color: white; padding: 20px; }
 .card { background: #1e293b; padding: 20px; border-radius: 10px; margin-bottom: 20px; }
-.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
-.kpi { font-size: 20px; font-weight: bold; }
+.grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.kpi { font-size: 18px; font-weight: bold; }
 </style>
 </head>
 <body>
 
-<h1>📊 Dashboard Fiscal PRO</h1>
+<h1>📊 Dashboard Fiscal Inteligente</h1>
 
 <div class="card">
 <input type="file" id="fileInput" multiple>
-<button onclick="processar()">Analisar PDFs</button>
+<button onclick="processar()">Analisar Balancetes</button>
 </div>
 
 <div class="grid">
 <div class="card kpi" id="receita"></div>
 <div class="card kpi" id="despesa"></div>
+<div class="card kpi" id="investimento"></div>
 <div class="card kpi" id="resultado"></div>
 </div>
 
@@ -34,7 +35,7 @@ body { font-family: Arial; background: #0f172a; color: white; padding: 20px; }
 </div>
 
 <div class="card">
-<canvas id="graficoBarra"></canvas>
+<canvas id="graficoCategoria"></canvas>
 </div>
 
 <div class="card">
@@ -43,15 +44,13 @@ body { font-family: Arial; background: #0f172a; color: white; padding: 20px; }
 
 <script>
 let dados = [];
-let categorias = {
-  energia: 0,
-  agua: 0,
-  manutencao: 0,
-  folha: 0,
-  outros: 0
-};
+let categorias = {};
+let chart1, chart2;
 
 async function processar() {
+  dados = [];
+  categorias = {};
+
   const files = document.getElementById('fileInput').files;
 
   for (let file of files) {
@@ -96,64 +95,91 @@ function extrairMes(nome) {
   return "MÊS " + (dados.length + 1);
 }
 
-function classificar(texto, valor) {
-  texto = texto.toLowerCase();
+function detectarCategoria(bloco) {
+  bloco = bloco.toLowerCase();
 
-  if (texto.includes("energia")) categorias.energia += valor;
-  else if (texto.includes("agua")) categorias.agua += valor;
-  else if (texto.includes("manut")) categorias.manutencao += valor;
-  else if (texto.includes("salario") || texto.includes("folha")) categorias.folha += valor;
-  else categorias.outros += valor;
+  if (bloco.includes("pessoal")) return "PESSOAL";
+  if (bloco.includes("serviço")) return "SERVIÇOS";
+  if (bloco.includes("consumo") || bloco.includes("energia")) return "ENERGIA";
+  if (bloco.includes("manutenção")) return "MANUTENÇÃO";
+  if (bloco.includes("conservação")) return "CONSERVAÇÃO";
+  if (bloco.includes("obras")) return "OBRAS";
+  if (bloco.includes("administrativa")) return "ADMIN";
+  if (bloco.includes("imobilizado")) return "IMOBILIZADO";
+  if (bloco.includes("tributos")) return "IMPOSTOS";
+
+  return "OUTROS";
 }
 
 function analisarTexto(texto, nome) {
-  const valores = texto.match(/\d+[.,]\d+/g) || [];
+  let linhas = texto.split(/(?=DESPESAS|OBRAS|IMOBILIZADO|ADMINISTRATIVAS)/i);
 
-  let receitas = 0;
-  let despesas = 0;
+  let receitasMatch = texto.match(/TOTAL DE RECEITAS:\\s*([\\d.,]+)/i);
+  let despesasMatch = texto.match(/TOTAL DE DESPESAS:\\s*([\\d.,]+)/i);
 
-  valores.forEach((v, i) => {
-    const valor = parseFloat(v.replace(",", "."));
-    if (!isNaN(valor)) {
-      if (i % 2 === 0) receitas += valor;
-      else {
-        despesas += valor;
-        classificar(texto, valor);
+  let receitas = receitasMatch ? parseFloat(receitasMatch[1].replace(",", ".")) : 0;
+  let despesas = despesasMatch ? parseFloat(despesasMatch[1].replace(",", ".")) : 0;
+
+  let investimento = 0;
+  let operacional = 0;
+
+  linhas.forEach(bloco => {
+    let categoria = detectarCategoria(bloco);
+
+    let valores = bloco.match(/\\d+[.,]\\d+/g) || [];
+
+    valores.forEach(v => {
+      let valor = parseFloat(v.replace(",", "."));
+
+      if (categoria === "OBRAS" || categoria === "IMOBILIZADO") {
+        investimento += valor;
+      } else {
+        operacional += valor;
       }
-    }
+
+      categorias[categoria] = (categorias[categoria] || 0) + valor;
+    });
   });
 
-  const resultado = receitas - despesas;
+  let resultado = receitas - despesas;
 
   dados.push({
     mes: extrairMes(nome),
     receitas,
     despesas,
+    investimento,
+    operacional,
     resultado
   });
 }
 
 function gerarDashboard() {
   let totalReceita = dados.reduce((a,b)=>a+b.receitas,0);
-  let totalDespesa = dados.reduce((a,b)=>a+b.despesas,0);
-  let totalResultado = totalReceita - totalDespesa;
+  let totalDespesa = dados.reduce((a,b)=>a+b.operacional,0);
+  let totalInvest = dados.reduce((a,b)=>a+b.investimento,0);
+  let totalResultado = totalReceita - (totalDespesa + totalInvest);
 
   document.getElementById("receita").innerText = "💰 Receita: R$ " + totalReceita.toFixed(2);
-  document.getElementById("despesa").innerText = "💸 Despesa: R$ " + totalDespesa.toFixed(2);
+  document.getElementById("despesa").innerText = "💸 Operacional: R$ " + totalDespesa.toFixed(2);
+  document.getElementById("investimento").innerText = "🏗️ Investimento: R$ " + totalInvest.toFixed(2);
   document.getElementById("resultado").innerText = "📊 Resultado: R$ " + totalResultado.toFixed(2);
 
-  new Chart(document.getElementById("graficoLinha"), {
+  if (chart1) chart1.destroy();
+  if (chart2) chart2.destroy();
+
+  chart1 = new Chart(document.getElementById("graficoLinha"), {
     type: 'line',
     data: {
       labels: dados.map(d=>d.mes),
       datasets: [
         { label: "Receita", data: dados.map(d=>d.receitas) },
-        { label: "Despesa", data: dados.map(d=>d.despesas) }
+        { label: "Despesa", data: dados.map(d=>d.despesas) },
+        { label: "Resultado", data: dados.map(d=>d.resultado) }
       ]
     }
   });
 
-  new Chart(document.getElementById("graficoBarra"), {
+  chart2 = new Chart(document.getElementById("graficoCategoria"), {
     type: 'bar',
     data: {
       labels: Object.keys(categorias),
@@ -164,20 +190,25 @@ function gerarDashboard() {
     }
   });
 
-  gerarRelatorio(totalReceita, totalDespesa, totalResultado);
+  gerarRelatorio(totalReceita, totalDespesa, totalInvest, totalResultado);
 }
 
-function gerarRelatorio(r, d, res) {
-  let texto = "📊 RELATÓRIO INTELIGENTE\\n\\n";
+function gerarRelatorio(r, d, inv, res) {
+  let texto = "📊 RELATÓRIO EXECUTIVO\\n\\n";
 
   dados.forEach((m, i) => {
-    texto += `${m.mes} → Resultado: R$ ${m.resultado.toFixed(2)}\\n`;
+    texto += `📅 ${m.mes}\\n`;
+    texto += `Receita: R$ ${m.receitas.toFixed(2)}\\n`;
+    texto += `Despesa: R$ ${m.despesas.toFixed(2)}\\n`;
+    texto += `Resultado: R$ ${m.resultado.toFixed(2)}\\n`;
 
-    if (m.resultado < 0) texto += "❌ Prejuízo\\n";
+    if (m.resultado < 0) texto += "❌ PREJUÍZO\\n";
 
     if (i > 0) {
       let variação = m.resultado - dados[i-1].resultado;
       texto += `📈 Variação: ${variação.toFixed(2)}\\n`;
+
+      if (variação < 0) texto += "⚠️ Queda financeira\\n";
     }
 
     texto += "\\n";
@@ -188,12 +219,16 @@ function gerarRelatorio(r, d, res) {
     texto += `${c}: R$ ${categorias[c].toFixed(2)}\\n`;
   }
 
-  texto += "\\n💡 INSIGHTS\\n";
+  texto += "\\n🚨 ALERTAS\\n";
 
-  if (d > r * 0.9) texto += "- Despesas muito altas\\n";
+  if (d > r * 0.9) texto += "- Despesas operacionais muito altas\\n";
+  if (inv > r * 0.3) texto += "- Investimentos elevados no período\\n";
   if (dados.some(m => m.resultado < 0)) texto += "- Existem meses com prejuízo\\n";
 
-  texto += "- Maior categoria deve ser revisada\\n";
+  texto += "\\n💡 RECOMENDAÇÕES\\n";
+  texto += "- Separar claramente CAPEX (obras) e OPEX\\n";
+  texto += "- Revisar contratos de maior custo\\n";
+  texto += "- Controlar despesas recorrentes\\n";
 
   document.getElementById("relatorio").innerText = texto;
 }
