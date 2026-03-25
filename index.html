@@ -2,7 +2,7 @@
 <html lang="pt-br">
 <head>
 <meta charset="UTF-8">
-<title>Dashboard Fiscal Inteligente PRO</title>
+<title>Dashboard Fiscal Ajustado</title>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -16,7 +16,7 @@ body { font-family: Arial; background: #0f172a; color: white; padding: 20px; }
 </head>
 <body>
 
-<h1>📊 Dashboard Fiscal Inteligente</h1>
+<h1>📊 Dashboard Fiscal (Sem IA)</h1>
 
 <div class="card">
 <input type="file" id="fileInput" multiple>
@@ -26,16 +26,12 @@ body { font-family: Arial; background: #0f172a; color: white; padding: 20px; }
 <div class="grid">
 <div class="card kpi" id="receita"></div>
 <div class="card kpi" id="despesa"></div>
-<div class="card kpi" id="investimento"></div>
 <div class="card kpi" id="resultado"></div>
+<div class="card kpi" id="meses"></div>
 </div>
 
 <div class="card">
-<canvas id="graficoLinha"></canvas>
-</div>
-
-<div class="card">
-<canvas id="graficoCategoria"></canvas>
+<canvas id="grafico"></canvas>
 </div>
 
 <div class="card">
@@ -44,12 +40,10 @@ body { font-family: Arial; background: #0f172a; color: white; padding: 20px; }
 
 <script>
 let dados = [];
-let categorias = {};
-let chart1, chart2;
+let chart;
 
 async function processar() {
   dados = [];
-  categorias = {};
 
   const files = document.getElementById('fileInput').files;
 
@@ -95,79 +89,41 @@ function extrairMes(nome) {
   return "MÊS " + (dados.length + 1);
 }
 
-function detectarCategoria(bloco) {
-  bloco = bloco.toLowerCase();
+function extrairValor(texto, regex) {
+  const match = texto.match(regex);
+  if (!match) return 0;
 
-  if (bloco.includes("pessoal")) return "PESSOAL";
-  if (bloco.includes("serviço")) return "SERVIÇOS";
-  if (bloco.includes("consumo") || bloco.includes("energia")) return "ENERGIA";
-  if (bloco.includes("manutenção")) return "MANUTENÇÃO";
-  if (bloco.includes("conservação")) return "CONSERVAÇÃO";
-  if (bloco.includes("obras")) return "OBRAS";
-  if (bloco.includes("administrativa")) return "ADMIN";
-  if (bloco.includes("imobilizado")) return "IMOBILIZADO";
-  if (bloco.includes("tributos")) return "IMPOSTOS";
-
-  return "OUTROS";
+  return parseFloat(match[1].replace(/\./g, "").replace(",", "."));
 }
 
 function analisarTexto(texto, nome) {
-  let linhas = texto.split(/(?=DESPESAS|OBRAS|IMOBILIZADO|ADMINISTRATIVAS)/i);
+  // 🔥 EXTRAÇÃO CORRETA (baseado no seu PDF real)
+  const receitas = extrairValor(texto, /TOTAL DE RECEITAS:\\s*([\\d.,]+)/i);
+  const despesas = extrairValor(texto, /TOTAL DE DESPESAS:\\s*([\\d.,]+)/i);
 
-  let receitasMatch = texto.match(/TOTAL DE RECEITAS:\\s*([\\d.,]+)/i);
-  let despesasMatch = texto.match(/TOTAL DE DESPESAS:\\s*([\\d.,]+)/i);
-
-  let receitas = receitasMatch ? parseFloat(receitasMatch[1].replace(",", ".")) : 0;
-  let despesas = despesasMatch ? parseFloat(despesasMatch[1].replace(",", ".")) : 0;
-
-  let investimento = 0;
-  let operacional = 0;
-
-  linhas.forEach(bloco => {
-    let categoria = detectarCategoria(bloco);
-
-    let valores = bloco.match(/\\d+[.,]\\d+/g) || [];
-
-    valores.forEach(v => {
-      let valor = parseFloat(v.replace(",", "."));
-
-      if (categoria === "OBRAS" || categoria === "IMOBILIZADO") {
-        investimento += valor;
-      } else {
-        operacional += valor;
-      }
-
-      categorias[categoria] = (categorias[categoria] || 0) + valor;
-    });
-  });
-
-  let resultado = receitas - despesas;
+  const resultado = receitas - despesas;
 
   dados.push({
     mes: extrairMes(nome),
     receitas,
     despesas,
-    investimento,
-    operacional,
     resultado
   });
 }
 
 function gerarDashboard() {
   let totalReceita = dados.reduce((a,b)=>a+b.receitas,0);
-  let totalDespesa = dados.reduce((a,b)=>a+b.operacional,0);
-  let totalInvest = dados.reduce((a,b)=>a+b.investimento,0);
-  let totalResultado = totalReceita - (totalDespesa + totalInvest);
+  let totalDespesa = dados.reduce((a,b)=>a+b.despesas,0);
+  let totalResultado = totalReceita - totalDespesa;
 
   document.getElementById("receita").innerText = "💰 Receita: R$ " + totalReceita.toFixed(2);
-  document.getElementById("despesa").innerText = "💸 Operacional: R$ " + totalDespesa.toFixed(2);
-  document.getElementById("investimento").innerText = "🏗️ Investimento: R$ " + totalInvest.toFixed(2);
+  document.getElementById("despesa").innerText = "💸 Despesa: R$ " + totalDespesa.toFixed(2);
   document.getElementById("resultado").innerText = "📊 Resultado: R$ " + totalResultado.toFixed(2);
+  document.getElementById("meses").innerText = "📅 Meses: " + dados.length;
 
-  if (chart1) chart1.destroy();
-  if (chart2) chart2.destroy();
+  if (chart) chart.destroy();
 
-  chart1 = new Chart(document.getElementById("graficoLinha"), {
+  chart = new Chart(document.getElementById("grafico"), {
     type: 'line',
     data: {
       labels: dados.map(d=>d.mes),
@@ -179,22 +135,11 @@ function gerarDashboard() {
     }
   });
 
-  chart2 = new Chart(document.getElementById("graficoCategoria"), {
-    type: 'bar',
-    data: {
-      labels: Object.keys(categorias),
-      datasets: [{
-        label: "Despesas por Categoria",
-        data: Object.values(categorias)
-      }]
-    }
-  });
-
-  gerarRelatorio(totalReceita, totalDespesa, totalInvest, totalResultado);
+  gerarRelatorio();
 }
 
-function gerarRelatorio(r, d, inv, res) {
-  let texto = "📊 RELATÓRIO EXECUTIVO\\n\\n";
+function gerarRelatorio() {
+  let texto = "📊 RELATÓRIO PARA SÍNDICO\\n\\n";
 
   dados.forEach((m, i) => {
     texto += `📅 ${m.mes}\\n`;
@@ -202,33 +147,26 @@ function gerarRelatorio(r, d, inv, res) {
     texto += `Despesa: R$ ${m.despesas.toFixed(2)}\\n`;
     texto += `Resultado: R$ ${m.resultado.toFixed(2)}\\n`;
 
-    if (m.resultado < 0) texto += "❌ PREJUÍZO\\n";
+    if (m.resultado < 0) {
+      texto += "❌ PREJUÍZO DETECTADO\\n";
+    }
 
     if (i > 0) {
-      let variação = m.resultado - dados[i-1].resultado;
-      texto += `📈 Variação: ${variação.toFixed(2)}\\n`;
-
-      if (variação < 0) texto += "⚠️ Queda financeira\\n";
+      let variacao = m.resultado - dados[i-1].resultado;
+      texto += `📈 Variação: ${variacao.toFixed(2)}\\n`;
     }
 
     texto += "\\n";
   });
 
-  texto += "📂 CATEGORIAS\\n";
-  for (let c in categorias) {
-    texto += `${c}: R$ ${categorias[c].toFixed(2)}\\n`;
+  texto += "🚨 ANÁLISE\\n";
+
+  if (dados.some(m => m.resultado < 0)) {
+    texto += "- Existem meses com prejuízo\\n";
   }
 
-  texto += "\\n🚨 ALERTAS\\n";
-
-  if (d > r * 0.9) texto += "- Despesas operacionais muito altas\\n";
-  if (inv > r * 0.3) texto += "- Investimentos elevados no período\\n";
-  if (dados.some(m => m.resultado < 0)) texto += "- Existem meses com prejuízo\\n";
-
-  texto += "\\n💡 RECOMENDAÇÕES\\n";
-  texto += "- Separar claramente CAPEX (obras) e OPEX\\n";
-  texto += "- Revisar contratos de maior custo\\n";
-  texto += "- Controlar despesas recorrentes\\n";
+  texto += "- Monitorar despesas mensais\\n";
+  texto += "- Avaliar contratos e custos fixos\\n";
 
   document.getElementById("relatorio").innerText = texto;
 }
